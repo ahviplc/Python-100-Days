@@ -17,8 +17,8 @@
 1. 引入原生多媒体支持（audio和video标签）
 2. 引入可编程内容（canvas标签）
 3. 引入语义Web（article、aside、details、figure、footer、header、nav、section、summary等标签）
-4. 引入新的表单控件（日历、邮箱、搜索等）
-5. 引入对离线存储更好的支持
+4. 引入新的表单控件（日历、邮箱、搜索、滑条等）
+5. 引入对离线存储更好的支持（localStorage和sessionStorage）
 6. 引入对定位、拖放、WebSocket、后台任务等的支持
 
 ### 使用标签承载内容
@@ -233,10 +233,10 @@
  - 访问元素
     - getElementById() / querySelector()
     - getElementsByClassName() / getElementsByTagName() / querySelectorAll()
-    - parentNode / previousSibling / nextSibling / firstChild / lastChild
+    - parentNode / previousSibling / nextSibling / children / firstChild / lastChild
 - 操作元素
   - nodeValue
-  - innerHTML / textContent / createElement() / createTextNode() / appendChild() / removeChild()
+  - innerHTML / textContent / createElement() / createTextNode() / appendChild() / insertBefore() / removeChild()
   - className / id / hasAttribute() / getAttribute() / setAttribute() / removeAttribute()
 - 事件处理
   - 事件类型
@@ -251,7 +251,7 @@
     - 事件监听器（旧的浏览器中不被支持）
   - 事件流：事件捕获 / 事件冒泡
   - 事件对象（低版本IE中的window.event）
-    - target（低版本IE中的srcElement）
+    - target（有些浏览器使用srcElement）
     - type
     - cancelable
     - preventDefault()
@@ -286,7 +286,6 @@
 - 从CDN加载jQuery
 
 ```HTML
-
 <script src="https://cdn.bootcss.com/jquery/3.3.1/jquery.min.js"></script>
 <script>
     window.jQuery || 
@@ -335,7 +334,6 @@
 #### 检测页面是否可用
 
 ```HTML
-
 <script>
     $(document).ready(function() {
         
@@ -344,7 +342,6 @@
 ```
 
 ```HTML
-
 <script>
     $(function() {
         
@@ -364,7 +361,6 @@
 先引入其他库再引入jQuery的情况。
 
 ```HTML
-
 <script src="other.js"></script>
 <script src="jquery.js"></script>
 <script>
@@ -409,4 +405,3 @@
 2. 封装的CSS
 3. 现成的组件
 4. JavaScript插件
-
