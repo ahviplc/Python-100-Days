@@ -4,9 +4,9 @@
 
 问题1：描述一个Web应用的工作流程。
 
-![](./res/web-application.png)
+![s](./res/web-application.png)
 
-问题2：描述项目的物理架构。（上图中补充负载均衡（反向代理）服务器、数据库服务器、文件服务器、邮件服务器、缓存服务器、防火墙等，而且每个节点都有可能是多节点构成的集群，如下图所示）
+问题2：描述项目的物理架构。（上图中补充负载均衡（反向代理）服务器、数据库服务器、文件服务器、邮件服务器、缓存服务器、防火墙等，而且每个节点都有可能是多节点构成的集群，如下图所示，架构并不是一开始就是这样，而是逐步演进的）
 
 ![](./res/05.django_massive_cluster.png)
 
@@ -108,7 +108,7 @@ python manage.py inspectdb > <appname>/models.py
 2. `ForeignKey`的属性：
 
    - 重要属性：
-     - `db_constraint`（提升性能或者数据分片的情况可能需要设置为False）
+     - `db_constraint`（提升性能或者数据分片的情况可能需要设置为`False`）
 
      - `on_delete`
 
@@ -219,6 +219,8 @@ python manage.py inspectdb > <appname>/models.py
 
 5. `Q`对象和`F`对象
 
+   > 说明：Q对象主要用来解决多条件组合的复杂查询；F对象主要用于更新数据。
+
    ```Python
    >>> from django.db.models import Q
    >>> Emp.objects.filter(
@@ -229,17 +231,19 @@ python manage.py inspectdb > <appname>/models.py
    ```
 
    ```Python
-   reporter = Reporters.objects.filter(name='Tintin')
-   reporter.update(stories_filed=F('stories_filed') + 1)
+   >>> from backend.models import Emp, Dept
+   >>> emps = Emp.objects.filter(dept__no=20)
+   >>> from django.db.models import F
+   >>> emps.update(sal=F('sal') + 100)
    ```
 
 6. 原生SQL查询
 
    ```Python
-   from django.db import connection
+   from django.db import connections
    
    
-   with connection.cursor() as cursor:
+   with connections['...'].cursor() as cursor:
        cursor.execute("UPDATE TbEmp SET sal=sal+10 WHERE dno=30")
        cursor.execute("SELECT ename, job FROM TbEmp WHERE dno=10")
        row = cursor.fetchall()
@@ -252,13 +256,17 @@ python manage.py inspectdb > <appname>/models.py
        
        def title_count(self, keyword):
            return self.filter(title__icontains=keyword).count()
+   
+   class Book(models.Model):
+       
+       objects = BookManager()
    ```
 
 ### 视图函数(Controller)
 
 #### 如何设计视图函数
 
-1. 用户的每个操作对应一个视图函数。
+1. 用户的每个操作（用户故事）对应一个视图函数。
 
 2. [每个视图函数可以构成一个事务边界](https://docs.djangoproject.com/en/2.1/ref/settings/)。
 
@@ -295,14 +303,14 @@ python manage.py inspectdb > <appname>/models.py
        ATOMIC_REQUESTS = True
        ```
 
-     - 使用事务装饰器（简单易用）。
+     - 使用事务装饰器（简单易用） - 粗粒度（控制不够精细）。
 
        ```Python
        @transaction.non_atomic_requests
        @transaction.atomic
        ```
 
-     - 使用上下文语法（事务控制的范围更加精准）。
+     - 使用上下文语法（细粒度 - 事务控制的范围更加精准）。
 
        ```Python
        with transaction.atomic():
@@ -440,7 +448,7 @@ python manage.py inspectdb > <appname>/models.py
 1. 前端模板引擎：Handlebars / Mustache。
 2. 前端MV\*框架。
    - MVC - AngularJS
-   - MVVM - Vue.js
+   - MVVM(Model-View-ViewModel) - Vue.js
 
 #### 其他视图
 
@@ -485,6 +493,49 @@ python manage.py inspectdb > <appname>/models.py
      resp.write(buffer.getvalue())
      ```
 
+     ```Python
+     def get_style(name, color=0, bold=False, italic=False):
+         style = xlwt.XFStyle()
+         font = xlwt.Font()
+         font.name = name
+         font.colour_index = color
+         font.bold = bold
+         font.italic = italic
+         style.font = font
+         return style
+     
+     
+     def export_emp_excel(request):
+         # 创建Excel工作簿(使用三方库xlwt)
+         workbook = xlwt.Workbook()
+         # 向工作簿中添加工作表
+         sheet = workbook.add_sheet('员工详细信息')
+         # 设置表头
+         titles = ['编号', '姓名', '主管', '职位', '工资', '部门名称']
+         for col, title in enumerate(titles):
+             sheet.write(0, col, title, get_style('HanziPenSC-W3', 2, True))
+         # 使用Django的ORM框架查询员工数据
+         emps = Emp.objects.all().select_related('dept').select_related('mgr')
+         cols = ['no', 'name', 'mgr', 'job', 'sal', 'dept']
+         # 通过嵌套的循环将员工表的数据写入Excel工作表的单元格
+         for row, emp in enumerate(emps):
+             for col, prop in enumerate(cols):
+                 val = getattr(emp, prop, '')
+                 if isinstance(val, (Dept, Emp)):
+                     val = val.name
+                 sheet.write(row + 1, col, val)
+         # 将Excel文件的二进制数据写入内存
+         buffer = BytesIO()
+         workbook.save(buffer)
+         # 通过HttpResponse对象向浏览器输出Excel文件
+         resp = HttpResponse(buffer.getvalue())
+         resp['content-type'] = 'application/msexcel'
+         # 如果文件名有中文需要处理成百分号编码
+         resp['content-disposition'] = 'attachment; filename="detail.xls"'
+         return resp
+     
+     ```
+
    - 大文件的流式处理：`StreamingHttpResponse`。
 
      ```Python
@@ -500,11 +551,79 @@ python manage.py inspectdb > <appname>/models.py
          return resp
      ```
 
-     > 说明：如果需要生成PDF文件，可以需要安装`reportlab`；生成Excel可以使用`openpyxl`或`xlrd`。
+     > 说明：如果需要生成PDF文件，可以需要安装`reportlab`。另外，使用StreamingHttpResponse只能减少内存的开销，但是如果下载一个大文件会导致一个请求长时间占用服务器资源，比较好的做法还是把报表提前生成好（可以考虑使用定时任务），放在静态资源服务器或者是云存储服务器上以访问静态资源的方式访问。
 
    - [ECharts](http://echarts.baidu.com/)或[Chart.js](https://www.chartjs.org/)。
 
      - 思路：后端只提供JSON格式的数据，前端JavaScript渲染生成图表。
+
+     ```Python
+     def get_charts_data(request):
+         """获取统计图表JSON数据"""
+         names = []
+         totals = []
+         # 通过connections获取指定数据库连接并创建游标对象
+         with connections['backend'].cursor() as cursor:
+             # 在使用ORM框架时可以使用对象管理器的aggregate()和annotate()方法实现分组和聚合函数查询
+             # 执行原生SQL查询(如果ORM框架不能满足业务或性能需求)
+             cursor.execute('select dname, total from vw_dept_emp')
+             for row in cursor.fetchall():
+                 names.append(row[0])
+                 totals.append(row[1])
+         return JsonResponse({'names': names, 'totals': totals})
+     ```
+
+     ```HTML
+     <!DOCTYPE html>
+     <html lang="en">
+     <head>
+         <meta charset="UTF-8">
+         <title>统计图表</title>
+         <style>
+             #main {
+                 width: 600px;
+                 height: 400px;
+             }
+         </style>
+     </head>
+     <body>
+         <div id="main"></div>
+         <script src="https://cdn.bootcss.com/echarts/4.2.0-rc.2/echarts.min.js"></script>
+         <script src="https://cdn.bootcss.com/jquery/3.3.1/jquery.min.js"></script>
+         <script>
+             var myChart = echarts.init($('#main')[0]);
+             $.ajax({
+                 'url': 'charts_data',
+                 'type': 'get',
+                 'data': {},
+                 'dataType': 'json',
+                 'success': function(json) {
+                     var option = {
+                         title: {
+                             text: '员工分布统计图'
+                         },
+                         tooltip: {},
+                         legend: {
+                             data:['人数']
+                         },
+                         xAxis: {
+                             data: json.names
+                         },
+                         yAxis: {},
+                         series: [{
+                             name: '人数',
+                             type: 'bar',
+                             data: json.totals
+                         }]
+                     };
+                     myChart.setOption(option);
+                 },
+                 'error': function() {}
+             });
+         </script>
+     </body>
+     </html>
+     ```
 
 
 ### 中间件
@@ -536,9 +655,9 @@ MIDDLEWARE = [
 ```Python
 def simple_middleware(get_response):
     
-    def middleware(request):
+    def middleware(request, *args, **kwargs):
         
-		response = get_response(request)
+		response = get_response(request, *args, **kwargs)
         
 		return response
     
@@ -555,10 +674,6 @@ class MyMiddleware(object):
         
         response = self.get_response(request)
        
-        return response
-    
-    def process_view(self, request, view_func, view_args, view_kwargs):
-        response = view_func(*view_args, **view_kwargs)
         return response
 ```
 
@@ -623,7 +738,20 @@ class MyMiddleware(object):
 
 问题1：Django中的`Form`和`ModelForm`有什么作用？（通常不用来生成表单主要用来验证数据）
 
-问题2：表单上传文件时应该注意哪些问题？（表单的设置、多文件上传、图片预览、Ajax上传文件、上传后的文件如何存储）
+问题2：表单上传文件时应该注意哪些问题？（表单的设置、多文件上传、图片预览（FileReader）、Ajax上传文件、上传后的文件如何存储、调用云存储（如[阿里云OSS](https://www.aliyun.com/product/oss)、[七牛云](https://www.qiniu.com/)、[LeanCloud](https://leancloud.cn/storage/)等））
+
+```HTML
+<form action="" method="post" enctype="multipart/form-data">
+    <input type="file" name="..." multiple>
+    <input type="file" name="foo">
+    <input type="file" name="foo">
+    <input type="file" name="foo">
+</form>
+```
+
+> 说明：上传图片文件的预览效果可以通过HTML5的FileReader来实现。
+
+> 说明：使用云存储通常是比自己配置分布式文件系统这种方式更靠谱的做法，而且云存储通常成本并不太高，不仅如此大多数云存储还提供了如图片剪裁、生成水印、视频转码、CDN等服务。如果要自己做上传的视频文件转码，需要安装三方库ffmpeg，在程序中调用该三方库可以实现转码。
 
 ### Cookie和Session
 
@@ -635,7 +763,7 @@ class MyMiddleware(object):
    http://www.abc.com/path/resource?foo=bar
    ```
 
-2. 隐藏域（隐式表单域）
+2. 隐藏域（隐式表单域）- 埋点
 
    ```HTML
    <form action="" method="post">
@@ -645,7 +773,7 @@ class MyMiddleware(object):
    </form>
    ```
 
-3. Cookie
+3. Cookie - 浏览器中的临时文件（文本文件）- BASE64
 
 问题2：Cookie和Session之间关系是什么？（Session的标识通过Cookie保存和传输）
 
@@ -683,6 +811,7 @@ class MyMiddleware(object):
    ```Python
    SESSION_COOKIE_NAME = 'djang_session_id'
    SESSION_COOKIE_AGE = 1209600
+   # 如果设置为True，Cookie就是基于浏览器窗口的Cookie，不会持久化
    SESSION_EXPIRE_AT_BROWSER_CLOSE = False 
    SESSION_SAVE_EVERY_REQUEST = False
    SESSION_COOKIE_HTTPONLY = True
@@ -702,9 +831,10 @@ class MyMiddleware(object):
    SESSION_SERIALIZER = 'django.contrib.sessions.serializers.JSONSerializer'
    ```
 
-   - JSONSerializer（1.6及以后默认）- 如果想将自定义的对象放到session中，会遇到“Object of type 'XXX' is not JSON serializable”的问题。
+   - JSONSerializer（1.6及以后默认）- 如果想将自定义的对象放到session中，会遇到“Object of type 'XXX' is not JSON serializable”的问题（如果配置使用Redis保存Session，django-redis使用了Pickle序列化，这个问题就不存在了）。
    - PickleSerializer（1.6以前的默认）- 因为安全问题不推荐使用，但是只要不去反序列化用户构造的恶意的Payload其实也没有什么风险。关于这种方式的安全漏洞，可以参考《[Python Pickle的任意代码执行漏洞实践和Payload构造》](http://www.polaris-lab.com/index.php/archives/178/)一文或《软件架构-Python语言实现》上关于这个问题的讲解。
-   - 说明：如果使用了django_redis整合Redis作为session的存储引擎，那么由于django_redis又封装了一个PickleSerializer来提供序列化，所以不会存在上述的问题，且Redis中保存的value是pickle序列化之后的结果。
+
+     > 说明：如果使用了django_redis整合Redis作为session的存储引擎，那么由于django_redis又封装了一个PickleSerializer来提供序列化，所以不会存在上述的问题，且Redis中保存的value是pickle序列化之后的结果。
 
 
 ### 缓存
@@ -720,7 +850,7 @@ CACHES = {
         'LOCATION': [
             'redis://1.2.3.4:6379/0',
         ],
-        'KEY_PREFIX': 'fang',
+        'KEY_PREFIX': 'teamproject',
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
             'CONNECTION_POOL_KWARGS': {
@@ -735,7 +865,7 @@ CACHES = {
         'LOCATION': [
             'redis://1.2.3.4:6379/1',
         ],
-        'KEY_PREFIX': 'fang:page',
+        'KEY_PREFIX': 'teamproject:page',
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
             'CONNECTION_POOL_KWARGS': {
@@ -750,7 +880,7 @@ CACHES = {
         'LOCATION': [
             'redis://1.2.3.4:6379/2',
         ],
-        'KEY_PREFIX': 'fang:session',
+        'KEY_PREFIX': 'teamproject:session',
         'TIMEOUT': 1209600,
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
@@ -760,13 +890,13 @@ CACHES = {
             'PASSWORD': '1qaz2wsx',
         }
     },
-    # 验证码缓存
-    'code': {
+    # 接口数据缓存
+    'api': {
         'BACKEND': 'django_redis.cache.RedisCache',
         'LOCATION': [
             'redis://1.2.3.4:6379/3',
         ],
-        'KEY_PREFIX': 'fang:code:tel',
+        'KEY_PREFIX': 'teamproject:api',
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
             'CONNECTION_POOL_KWARGS': {
@@ -777,6 +907,8 @@ CACHES = {
     },
 }
 ```
+> 说明：通过Redis底层提供的多个数据库来隔离缓存数据有助于缓存数据的管理。如果配置了Redis的主从复制（读写分离），LOCATION列表中可以配置多个Redis连接，第一个被视为master用来进行写操作，后面的被视为slave用来进行读操作。
+
 #### 全站缓存
 
 ```Python
@@ -888,7 +1020,7 @@ LOGGING = {
         },
         'file1': {
             'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': 'fang.log',
+            'filename': 'access.log',
             'when': 'W0',
             'backupCount': 12,
             'formatter': 'simple',
@@ -934,6 +1066,8 @@ LOGGING = {
    - Logstash：负责从指定节点收集日志。
    - Kibana：日志可视化工具。
 
+5. 大数据日志处理：Flume+Kafka日志采集、Storm / Spark实时数据处理、Impala实时查询。
+
 ### RESTful
 
 问题1：RESTful架构到底解决了什么问题？（URL具有自描述性、资源表述与视图的解耦和、互操作性利用构建微服务以及集成第三方系统、无状态性提高水平扩展能力）
@@ -970,9 +1104,27 @@ INSTALLED_APPS = [
 
 REST_FRAMEWORK = {
     # 配置默认页面大小
-    'PAGE_SIZE': 5,
+    'PAGE_SIZE': 10,
     # 配置默认的分页类
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    # 配置异常处理器
+    # 'EXCEPTION_HANDLER': 'api.exceptions.exception_handler',
+    # 配置默认解析器
+    # 'DEFAULT_PARSER_CLASSES': (
+    #     'rest_framework.parsers.JSONParser',
+    #     'rest_framework.parsers.FormParser',
+    #     'rest_framework.parsers.MultiPartParser',
+    # ),
+    # 配置默认限流类
+    # 'DEFAULT_THROTTLE_CLASSES': (),
+    # 配置默认授权类
+    # 'DEFAULT_PERMISSION_CLASSES': (
+    #     'rest_framework.permissions.IsAuthenticated',
+    # ),
+    # 配置默认认证类
+    # 'DEFAULT_AUTHENTICATION_CLASSES': (
+    #     'rest_framework_jwt.authentication.JSONWebTokenAuthentication',
+    # ),
 }
 ```
 
@@ -980,68 +1132,72 @@ REST_FRAMEWORK = {
 
 ```Python
 from rest_framework import serializers
+from rest_framework.serializers import ModelSerializer
+
+from common.models import District, HouseType, Estate, Agent
 
 
-class HouseTypeSerializer(serializers.ModelSerializer):
+class DistrictSerializer(ModelSerializer):
+
+    class Meta:
+        model = District
+        fields = ('distid', 'name')
+
+
+class HouseTypeSerializer(ModelSerializer):
 
     class Meta:
         model = HouseType
         fields = '__all__'
 
 
-class DistrictSerializer(serializers.ModelSerializer):
-
-    class Meta:
-        model = District
-        fields = ('distid', 'name', 'intro')
-
-
-class AgentSerializer(serializers.ModelSerializer):
-    # 如果属性需要通过代码来获取就定义为SerializerMethodField
-    # 获取estates属性的方法应该命名为get_estates
-    estates = serializers.SerializerMethodField()
-
-    @staticmethod
-    def get_estates(agent):
-        ret_value = []
-        # 对于多对一外键关联(ForeignKey)可以用select_related提前加载关联属性
-        # 通过这种方式可以使用内连接或左外连接直接获取关联属性避免1+N查询问题
-        items = agent.estates.all().select_related('district')
-        for item in items:
-            ret_value.append({"estateid": item.estateid,
-                              "name": item.name,
-                              "district": DistrictSerializer(item.district).data})
-        return ret_value
+class AgentSerializer(ModelSerializer):
 
     class Meta:
         model = Agent
-        fields = ('agentid', 'name', 'tel', 'certificated', 'estates')
+        fields = ('agentid', 'name', 'tel', 'servstar', 'certificated')
+
+
+class EstateSerializer(ModelSerializer):
+    district = serializers.SerializerMethodField()
+    agents = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_agents(estate):
+        return AgentSerializer(estate.agents, many=True).data
+
+    @staticmethod
+    def get_district(estate):
+        return DistrictSerializer(estate.district).data
+
+    class Meta:
+        model = Estate
+        fields = '__all__'
 ```
 
 #### 方法1：使用装饰器
 
 ```Python
 @api_view(['GET'])
-@cache_page(timeout=None)
+@cache_page(timeout=None, cache='api')
 def provinces(request):
-    query_set = District.objects.filter(parent__isnull=True)
-    serializer = DistrictSerializer(query_set, many=True)
-    return JsonResponse(serializer.data, safe=False)
+    queryset = District.objects.filter(parent__isnull=True)
+    serializer = DistrictSerializer(queryset, many=True)
+    return Response(serializer.data)
 
 
 @api_view(['GET'])
-@cache_page(timeout=120)
-def districts(request, pid):
-    query_set = District.objects.filter(parent__distid=pid)
-    serializer = DistrictSerializer(query_set, many=True)
-    return JsonResponse(serializer.data, safe=False)
-
+@cache_page(timeout=300, cache='api')
+def cities(request, provid):
+    queryset = District.objects.filter(parent__distid=provid)
+    serializer = DistrictSerializer(queryset, many=True)
+    return Response(serializer.data)
 ```
 
 ```Python
 urlpatterns = [
     path('districts/', views.provinces, name='districts'),
-    path('districts/<int:pid>', views.districts, name='district'),
+    path('districts/<int:provid>/', views.cities, name='cities'),
 ]
 ```
 
@@ -1052,37 +1208,32 @@ urlpatterns = [
 更好的复用代码，不要重“复发明轮子”。
 
 ```Python
-from rest_framework.generics import ListAPIView
-from rest_framework.response import Response
-from rest_framework_extensions.cache.decorators import cache_response
-
-
-def customize_cache_key(view_instance, view_method, request, args, kwargs):
-    """自定义缓存的key的函数"""
-    full_path = request.get_full_path()
-    return f'fangall:api:{full_path}'
-
-
-class AgentDetailView(ListAPIView):
-    queryset = Agent.objects.all()
-    serializer_class = AgentDetailSerializer
-    pagination_class = None
-
-    @cache_response(key_func=customize_cache_key)
-    def get(self, request, agentid, *args, **kwargs):
-        query_set = Agent.objects.filter(agentid=agentid)\
-            .prefetch_related("estates").last()
-        serializer = AgentDetailSerializer(query_set)
-        return Response(serializer.data)
+class HouseTypeApiView(CacheResponseMixin, ListAPIView):
+    queryset = HouseType.objects.all()
+    serializer_class = HouseTypeSerializer
 ```
 
 ```Python
 urlpatterns = [
-    path('agents/<int:agentid>', views.AgentDetailView.as_view(), name='agent'),
+    path('housetypes/', views.HouseTypeApiView.as_view(), name='housetypes'),
 ]
 ```
 
-> 说明：上面使用了drf_extensions提供的@cache_response实现了对接口数据的缓存，并使用自定义的函数来生成缓存中的key。
+> 说明：上面使用了drf_extensions提供的CacheResponseMixin混入类实现了对接口数据的缓存。如果重写了获取数据的方法，可以使用drf_extensions提供的@cache_response来实现对接口数据的缓存，也可以用自定义的函数来生成缓存中的key。当然还有一个选择就是通过Django提供的@method_decorator装饰器，将@cache_page装饰器处理为装饰方法的装饰器，这样也能提供使用缓存服务。
+
+`drf-extensions`配置如下所示。
+
+```Python
+# 配置DRF扩展来支持缓存API接口调用结果
+REST_FRAMEWORK_EXTENSIONS = {
+    'DEFAULT_CACHE_RESPONSE_TIMEOUT': 300,
+    'DEFAULT_USE_CACHE': 'default',
+    # 配置默认缓存单个对象的key函数
+    'DEFAULT_OBJECT_CACHE_KEY_FUNC': 'rest_framework_extensions.utils.default_object_cache_key_func',
+    # 配置默认缓存对象列表的key函数
+    'DEFAULT_LIST_CACHE_KEY_FUNC': 'rest_framework_extensions.utils.default_list_cache_key_func',
+}
+```
 
 #### 方法3：使用ViewSet及其子类
 
@@ -1100,9 +1251,7 @@ router.register('housetypes', views.HouseTypeViewSet)
 urlpatterns += router.urls
 ```
 
-> 说明：上面使用了drf_extensions提供的CacheResponseMixin混入类实现了对接口数据的缓存。
-
-drf提供了基于Bootstrap定制的页面来显示接口返回的JSON数据，当然也可以使用[POSTMAN](https://www.getpostman.com/)这样的工具对API接口进行测试。
+djangorestframework提供了基于Bootstrap定制的页面来显示接口返回的JSON数据，当然也可以使用[POSTMAN](https://www.getpostman.com/)这样的工具对API接口进行测试。
 
 #### 补充说明
 
@@ -1175,12 +1324,88 @@ if request.method == 'POST' and '_method' in request.POST:
 <button id="okBtn">点我</button>
 <script src="js/jquery.min.js"></script>
 <script>
-    var btn = document.getElementById('okBtn');	// 原生JavaScript对象
-    // $(btn) --> jQuery --> 拥有更多的属性和方法而且没有浏览器兼容性问题
-    var $btn = $('#okBtn');	// jQuery对象
-    // $btn[0] / $btn.get(0) --> JavaScript --> 自己处理浏览器兼容性问题
+    var btn = document.getElementById('okBtn');	// 原生JavaScript对象(使用相对麻烦)
+    var $btn = $('#okBtn');	// jQuery对象(拥有更多的属性和方法而且没有浏览器兼容性问题)
     $btn.on('click', function() {});
+    // $(btn)可以将原生JavaScript对象转成jQuery对象
+    // $btn.get(0)或$btn[0]可以获得原生的JavaScript对象
 </script>
+```
+
+#### 过滤数据
+
+如果需要过滤数据（对数据接口设置筛选条件、排序条件等），可以使用`django-filter`三方库来实现。
+
+```Shell
+pip install django-filter
+```
+
+```Python
+INSTALLED_APPS = [
+    
+    'django_filters',
+
+]
+REST_FRAMEWORK = {
+  	
+    'DEFAULT_FILTER_BACKENDS': (
+        'django_filters.rest_framework.DjangoFilterBackend',
+        'rest_framework.filters.OrderingFilter',
+    ),
+    
+}
+```
+
+```Python
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import OrderingFilter
+from rest_framework.generics import RetrieveAPIView, ListCreateAPIView
+
+from api.serializers import EstateSerializer
+from common.models import Estate
+
+
+@method_decorator(decorator=cache_page(timeout=120, cache='api', key_prefix='estates'), name='get')
+class EstateView(RetrieveAPIView, ListCreateAPIView):
+    queryset = Estate.objects.all().select_related('district').prefetch_related('agents')
+    serializer_class = EstateSerializer
+    filter_backends = (DjangoFilterBackend, OrderingFilter)
+    filter_fields = ('name', 'district')
+    ordering = ('-hot', )
+    ordering_fields = ('hot', 'estateid')
+```
+
+```Python
+from django_filters import rest_framework as drf
+from common.models import HouseInfo
+
+
+class HouseInfoFilter(drf.FilterSet):
+    """自定义房源数据过滤器"""
+
+    title = drf.CharFilter(lookup_expr='starts')
+    dist = drf.NumberFilter(field_name='district')
+    min_price = drf.NumberFilter(field_name='price', lookup_expr='gte')
+    max_price = drf.NumberFilter(field_name='price', lookup_expr='lte')
+    type = drf.NumberFilter()
+
+    class Meta:
+        model = HouseInfo
+        fields = ('title', 'district', 'min_price', 'max_price', 'type')
+```
+
+```Python
+class HouseInfoViewSet(CacheResponseMixin, ReadOnlyModelViewSet):
+    queryset = HouseInfo.objects.all() \
+        .select_related('type', 'district', 'estate', 'agent') \
+        .prefetch_related('tags').order_by('-pubdate')
+    serializer_class = HouseInfoSerializer
+    filter_backends = (DjangoFilterBackend, OrderingFilter)
+    filterset_class = HouseInfoFilter
+    ordering = ('price',)
+    ordering_fields = ('price', 'area')
 ```
 
 #### 身份认证
@@ -1234,18 +1459,19 @@ DEFAULTS = {
 自定义认证类，继承`BaseAuthentication`并重写`authenticate(self, request)`方法，通过请求中的userid和token来确定用户身份。如果认证成功，该方法应返回一个二元组（用户和令牌的信息），否则产生异常。也可以重写 `authenticate_header(self, request)`方法来返回一个字符串，该字符串将用于`HTTP 401 Unauthorized`响应中的WWW-Authenticate响应头的值。如果未重写该方法，那么当未经身份验证的请求被拒绝访问时，身份验证方案将返回`HTTP 403 Forbidden`响应。
 
 ```Python
-class Authentication(BaseAuthentication):
+class MyAuthentication(BaseAuthentication):
+    """自定义用户身份认证类"""
 
     def authenticate(self, request):
         try:
-            userid = request.GET['userid']
-            token = request.GET['token']
-            user = User.objects.filter(userid=userid, token=token).first()
-            if not user:
-                raise AuthenticationFailed('用户身份信息认证失败')
-            return user, user
+            token = request.GET['token'] or request.POST['token']
+            user_token = UserToken.objects.filter(token=token).first()
+            if user_token:
+                return user_token.user, user_token
+            else:
+                raise AuthenticationFailed('请提供有效的用户身份标识')
         except KeyError:
-            raise NotAuthenticated('请提供当前用户身份认证信息')
+            raise AuthenticationFailed('请提供有效的用户身份标识')
 
     def authenticate_header(self, request):
         pass
@@ -1254,19 +1480,20 @@ class Authentication(BaseAuthentication):
 使用自定义的认证类。
 
 ```Python
-class AgentDetailView(ListAPIView):
-    queryset = Agent.objects.all()
-    serializer_class = AgentDetailSerializer
-    authentication_classes = [Authentication, ]
-    pagination_class = None
-
-    @cache_response(key_func=customize_cache_key)
-    def get(self, request, agentid, *args, **kwargs):
-        query_set = Agent.objects.filter(agentid=agentid)\
-            .prefetch_related("estates").last()
-        serializer = AgentDetailSerializer(query_set)
-        return Response(serializer.data)
+class EstateViewSet(CacheResponseMixin, ModelViewSet):
+    # 通过queryset指定如何获取数据（资源）
+    queryset = Estate.objects.all().select_related('district').prefetch_related('agents')
+    # 通过serializer_class指定如何序列化数据
+    serializer_class = EstateSerializer
+    # 指定根据哪些字段进行数据筛选
+    filter_fields = ('district', 'name')
+    # 指定根据哪些字段对数据进行排序
+    ordering_fields = ('hot', )
+    # 指定用于进行用户身份验证的类
+    authentication_classes = (MyAuthentication, )
 ```
+
+> 说明：也可以在Django配置文件中将自定义的认证类设置为默认认证方式。
 
 #### 授予权限
 
@@ -1344,7 +1571,12 @@ class BlacklistPermission(permissions.BasePermission):
 
 如果要实现更为完整的权限验证，可以考虑RBAC或ACL。
 
-1. RBAC - 基于角色的访问控制（用户-角色-权限-资源，都是多对多关系）。
+1. RBAC - 基于角色的访问控制，如下图所示。
+
+   ![](./res/rbac-basic.png)
+
+   ![](./res/rbac-full.png)
+
 2. ACL - 访问控制列表（每个用户绑定自己的访问白名单）。
 
 #### 访问限流
@@ -1358,8 +1590,8 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.UserRateThrottle'
     ),
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '100/day',
-        'user': '1000/day'
+        'anon': '3/min',
+        'user': '10000/day'
     }
 }
 ```
@@ -1387,7 +1619,7 @@ def example_view(request, format=None):
     # 此处省略下面的代码
 ```
 
-当然也可以通过继承`BaseThrottle`来自定义限流策略，需要重写`allow_request`和`wait`方法。
+当然也可以通过继承`BaseThrottle`来自定义限流策略，通常需要重写`allow_request`和`wait`方法。
 
 ### 异步任务和计划任务
 
@@ -1397,7 +1629,7 @@ Celery 是一个简单、灵活且可靠的，处理大量消息的分布式系�
 
 推荐阅读：[《Celery官方文档中文版》](http://docs.jinkan.org/docs/celery/)，上面有极为详细的配置和使用指南。
 
-![](./res/celery.png)
+![](./res/celery_architecture.png)
 
 Celery是一个本身不提供队列服务，官方推荐使用RabbitMQ或Redis来实现消息队列服务，前者是更好的选择，它对AMQP（高级消息队列协议）做出了非常好的实现。
 
@@ -1421,28 +1653,30 @@ Celery是一个本身不提供队列服务，官方推荐使用RabbitMQ或Redis�
 3. 创建Celery实例。
 
    ```Python
-   project_name = '...'
-   project_settings = '%s.settings' % project_name
-   
    # 注册环境变量
-   os.environ.setdefault('DJANGO_SETTINGS_MODULE', project_settings)
+   os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'fangtx.settings')
    
+   # 创建Celery实例
    app = celery.Celery(
-       project_name, 
+       'fangtx',
        broker='amqp://luohao:123456@120.77.222.217:5672/vhost1'
    )
    
-   # 从默认的配置文件读取配置信息
+   # 从项目的配置文件读取Celery配置信息
    app.config_from_object('django.conf:settings')
+   # 从指定的文件(例如celery_config.py)中读取Celery配置信息
+   # app.config_from_object('celery_config')
    
-   # Celery加载所有注册的应用
-   app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
+   # 让Celery自动从参数指定的应用中发现异步任务/定时任务
+   app.autodiscover_tasks(['common', ])
+   # 让Celery自动从所有注册的应用中发现异步任务/定时任务
+   # app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
    ```
 
 4. 启动Celery创建woker（消息的消费者）。
 
    ```Shell
-   celery -A <projname> worker -l debug &
+   celery -A <name> worker -l debug &
    ```
 
 5. 执行异步任务。
@@ -1485,13 +1719,20 @@ Celery是一个本身不提供队列服务，官方推荐使用RabbitMQ或Redis�
 7. 启动Celery创建执行定时任务的beat（消息的生产者）。
 
    ```Shell
-   celery -A <projname> beat -l info
+   celery -A <name> beat -l info
    ```
 
 8. 检查消息队列状况。
 
    ```Shell
    rabbitmqctl list_queues -p vhost1
+   ```
+
+9. 监控Celery - 可以通过flower来对Celery进行监控。
+
+   ```Shell
+   pip install flower
+   celery flower --broker=amqp://luohao:123456@120.77.222.217:5672/vhost1
    ```
 
 ### 其他问题
@@ -1502,13 +1743,17 @@ Celery是一个本身不提供队列服务，官方推荐使用RabbitMQ或Redis�
 INSTALLED_APPS = [
     'corsheaders',
 ]
+
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
 ]
+
+CORS_ORIGIN_ALLOW_ALL = True
 # 配置跨域白名单
-# CORS_ORIGIN_WHITELIST = ()
-# 配置是否跨域读取Cookie信息
+# CORS_ORIGIN_WHITELIST = ('www.abc.com', 'www.baidu.com')
+# CORS_ORIGIN_REGEX_WHITELIST = ('...', )
 # CORS_ALLOW_CREDENTIALS = True
+# CORS_ALLOW_METHODS = ('GET', 'POST', 'PUT', 'DELETE')
 ```
 
 问题2：网站图片（水印、剪裁）和视频（截图、水印、转码）是如何处理的？（云存储、FFmpeg）
@@ -1590,11 +1835,10 @@ CSRF令牌和小工具
    '1f09d30c707d53f3d16c530dd73d70a6ce7596a9'
    ```
 
-2. 加密和解密（对称加密[AES]和非对称加密[RSA]）
+2. 加密和解密（对称加密和非对称加密）
 
    ```Shell
    pip install rsa
-   pip install pycrypto
    ```
 
    ```Python
@@ -1605,6 +1849,47 @@ CSRF令牌和小工具
    b'Ou{gH\xa9\xa8}O\xe3\x1d\x052|M\x9d9?\xdc\xd8\xecF\xd3v\x9b\xde\x8e\x12\xe6M\xebvx\x08\x08\x8b\xe8\x86~\xe4^)w\xf2\xef\x9e\x9fOg\x15Q\xb7\x7f\x1d\xcfV\xf1\r\xbe^+\x8a\xbf }\x10\x01\xa4U9b\x97\xf5\xe0\x90T\'\xd4(\x9b\x00\xa5\x92\x17\xad4\xb0\xb0"\xd4\x16\x94*s\xe1r\xb7L\xe2\x98\xb7\x7f\x03\xd9\xf2\t\xee*\xe6\x93\xe6\xe1o\xfd\x18\x83L\x0cfL\xff\xe4\xdd%\xf2\xc0/\xfb'
    >>> origin = rsa.decrypt(crypto, pri_key).decode()
    >>> origin
+   'hello, world!'
+   ```
+
+   ```Shell
+   pip install pycrypto
+   ```
+
+   AES对称加密：
+
+   ```Python
+   >>> from hashlib import md5
+   >>>
+   >>> from Crypto.Cipher import AES
+   >>> from Crypto import Random
+   >>>
+   >>> key = md5(b'mysecret').hexdigest()
+   >>> iv = Random.new().read(AES.block_size)
+   >>> str1 = '我爱你们！'
+   >>> str2 = AES.new(key, AES.MODE_CFB, iv).encrypt(str1)
+   b'p\x96o\x85\x0bq\xc4-Y\xc4\xbcp\n)&'
+   >>> str3 = AES.new(key, AES.MODE_CFB, iv).decrypt(str2).decode()
+   '我爱你们！'
+   ```
+
+   RSA非对称加密：
+
+   ```Python
+   >>> from Crypto.PublicKey import RSA
+   >>> # 生成密钥对
+   >>> key_pair = RSA.generate(2048)
+   >>> # 导入公钥
+   >>> pub_key = RSA.importKey(key_pair.publickey().exportKey())
+   >>> # 导入私钥
+   >>> pri_key = RSA.importKey(key_pair.exportKey())
+   >>> # 明文
+   >>> message1 = 'hello, world!'.encode()
+   >>> # 加密数据
+   >>> message2 = pub_key.encrypt(message1, None)
+   (b'\x03\x86t\xa0\x00\xc4\xea\xd2\x80\xed\xa7YN7\x07\xff\x88\xaa\x1eW\x0cmH0\x06\xa7\'\xbc<w@q\x8b\xaf\xf7:g\x92{=\xe2E\xa5@\x1as2\xdd\xcb\x8e[\x98\x85\xdf,X\xecj.U\xd6\xa7W&u\'Uz"\x0f\x0e\\<\xa4\xfavC\x93\xa7\xbcO"\xb9a\x06]<.\xc1\r1}*\xdf\xccdqXML\x93\x1b\xe9\xda\xdf\xab|\xf8\x18\xe4\x99\xbb\x7f\x18}\xd9\x9a\x1e*J\\\xca\x1a\xd1\x85\xf7t\x81\xd95{\x19\xc9\x81\xb6^}\x9c5\xca\xfe\xcf\xc8\xd8M\x9a\x8c-\xf1t\xee\xf9\x12\x90\x01\xca\x92~\x00c5qg5g\x95&\x10\xb1\x0b\x1fo\x95\xf2\xbc\x8d\xf3f"@\xc5\x188\x0bX\x9cfo\xea\x97\x05@\xe5\xb2\xda\xb8\x97a\xa5w\xa8\x01\x9a\xa5N\xc4\x81\x8d\x0f<\x96iU\xd3\x95\xacJZs\xab_ #\xee\xf9\x0f\xf2\x12\xdb\xfc\xf8g\x18v\x02k+\xda\x16Si\xbf\xbb\xec\xf7w\x90\xde\xae\x97\t\xed{}5\xd0',)
+   >>> # 解密数据
+   >>> message3 = pri_key.decrypt(message2)
    'hello, world!'
    ```
 
@@ -1727,6 +2012,8 @@ def test_baidu_index(chrome):
 
 ```
 
+除了Selenium之外，还有一个Web自动化测试工具名叫Robot Framework。
+
 ```Shell
 nose2 -v -C
 pytest --cov
@@ -1766,8 +2053,7 @@ TOTAL                        427    367    14%
 
    - stub：测试期间为提供响应的函数生成的替代品
    - mock：代替实际对象（以及该对象的API）的对象
-
-     - fake：没有达到生产级别的轻量级对象
+   - fake：没有达到生产级别的轻量级对象
 
 #### 集成测试
 
@@ -1898,7 +2184,7 @@ TOTAL                             267    176    34%
 
 问题1：性能测试的指标有哪些？
 
-1. ab - Apache Benchmark / webbench / httpperf
+1. ab（ Apache Benchmark） / webbench / httpperf
 
    ```Shell
    yum -y install httpd
@@ -2203,9 +2489,9 @@ TOTAL                             267    176    34%
 
    ```INI
    [mysqld]
-   slow_query_log = ON
-   slow_query_log_file = /usr/local/mysql/data/slow.log
-   long_query_time = 1
+   slow_query_log=ON
+   slow_query_log_file=/usr/local/mysql/data/slow.log
+   long_query_time=1
    ```
 
 #### 其他
